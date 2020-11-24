@@ -1,0 +1,85 @@
+properties([
+    [$class: 'BuildDiscarderProperty', strategy: [$class: 'LogRotator', numToKeepStr: '25']]
+])
+
+def application = env.APPLICATION
+def approvalGates = env.APPROVAL_GATES ?: 'test,stage,prod'
+def buildLabel = env.BUILD_LABEL ?: 'maven'
+def buildStages = env.BUILD_STAGES ?: 'prepare,build,package'
+def buildType = env.BUILD_TYPE ?: 'gradle'
+def environments = env.ENVIRONMENTS ?: 'dev,test,stage,prod'
+def project = env.PROJECT
+def version = env.VERSION ?: "${env.MAJOR_VERSION ?: 1}.${env.MINOR_VERSION ?: 0}.${env.BUILD_NUMBER}".toString()
+
+def args = [
+    application  : application,
+    approvalGates: approvalGates,
+    project      : project,
+    version      : version
+]
+
+node(buildLabel) {
+    deleteDir()
+    checkout scm
+    for (buildStage in buildStages.tokenize(',')) {
+        stage(buildStage) {
+            if (fileExists("openshift/pipeline-ext/steps/${buildStage}.groovy")) {
+                echo "Using custom steps file for ${buildStage} stage."
+                def steps = load "openshift/pipeline-ext/steps/${buildStage}.groovy"
+                steps.execute(args)
+            } else if (fileExists("openshift/pipeline/steps/${buildType}/${buildStage}.groovy")) {
+                echo "Using ${buildType} steps file for ${buildStage} stage."
+                def steps = load "openshift/pipeline/steps/${buildType}/${buildStage}.groovy"
+                steps.execute(args)
+            } else {
+                echo "Using default steps file for ${buildStage} stage."
+                def steps = load "openshift/pipeline/steps/${buildStage}.groovy"
+                steps.execute(args)
+            }
+        }
+    }
+    stash name: 'openshift', includes: 'openshift/pipeline/**/*,openshift/pipeline-ext/**/*'
+}
+
+if (environments.matches(".*[a-zA-Z]+.*")) {
+    for (environment in environments.tokenize(',')) {
+        stage("approve - ${environment}") {
+            approve(args + [environment: environment])
+        }
+        stage("deploy - ${environment}") {
+            deploy(args + [environment: environment])
+        }
+    }
+}
+
+def approve(args) {
+    def steps
+    node('master') {
+        deleteDir()
+        unstash 'openshift'
+        if (fileExists('openshift/pipeline-ext/steps/approve.groovy')) {
+            steps = load 'openshift/pipeline-ext/steps/approve.groovy'
+        } else {
+            steps = load 'openshift/pipeline/steps/approve.groovy'
+        }
+    }
+    if (steps) {
+        steps.execute(args)
+    }
+}
+
+def deploy(args) {
+    node('master') {
+        deleteDir()
+        unstash 'openshift'
+        if (fileExists('openshift/pipeline-ext/steps/deploy.groovy')) {
+            echo 'Using custom steps file for deploy stage.'
+            def steps = load 'openshift/pipeline-ext/steps/deploy.groovy'
+            steps.execute(args + [cluster: env.ROS_CLUSTER_COLOUR])
+        } else {
+            echo 'Using default steps file for deploy stage.'
+            def steps = load 'openshift/pipeline/steps/deploy.groovy'
+            steps.execute(args + [cluster: env.ROS_CLUSTER_COLOUR])
+        }
+    }
+}

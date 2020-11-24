@@ -1,0 +1,13 @@
+spring:
+  data.mongodb.uri: mongodb://kiradmin:v3PYMBG98AkK8Qm7@em-vrgi-kird01.prodev.ros.gov.uk:27017/deedsdb?authSource=admin&authMechanism=SCRAM-SHA-1
+
+rac-db:
+  user: service_account
+  password: ChuckBoris
+  host: 10.253.0.102
+  port: 1433
+  db-name: RAC_LIVE
+
+parser:
+  force-parse: true
+

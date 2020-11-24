@@ -1,0 +1,359 @@
+apiVersion: v1
+kind: Template
+objects:
+
+# Deployment Config
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}
+    namespace: ${PROJECT}-${ENVIRONMENT}
+  spec:
+    replicas: ${{REPLICAS}}
+    revisionHistoryLimit: 5
+    selector:
+      app: ${APPLICATION}
+      deploymentconfig: ${APPLICATION}
+    strategy:
+      resources:
+        limits:
+          cpu: 250m
+          memory: 250Mi
+      rollingParams:
+        maxSurge: ${{MAX_SURGE}}
+        maxUnavailable: ${{MAX_UNAVAILABLE}}
+        timeoutSeconds: ${{DEPLOYMENT_TIMEOUT_SECONDS}}
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION}
+          deploymentconfig: ${APPLICATION}
+      spec:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - ${APPLICATION}
+              topologyKey: kubernetes.io/hostname
+        containers:
+          - env:
+              - name: GC_MAX_METASPACE_SIZE
+                value: ${GC_MAX_METASPACE_SIZE}
+              - name: JAVA_ARGS
+                value: ${JAVA_ARGS}
+              - name: JAVA_MAX_MEM_RATIO
+                value: ${JAVA_MAX_MEM_RATIO}
+              - name: MANAGEMENT_CONTEXT_PATH
+                value: ${MANAGEMENT_CONTEXT_PATH}
+              - name: MANAGEMENT_PORT
+                value: ${MANAGEMENT_PORT}
+              - name: MANAGEMENT_SECURITY_ENABLED
+                value: ${MANAGEMENT_SECURITY_ENABLED}
+              - name: OPENSHIFT_DEPLOYMENT_CLUSTER
+                value: ${CLUSTER}
+              - name: OPENSHIFT_DEPLOYMENT_ENVIRONMENT
+                value: ${ENVIRONMENT}
+              - name: OPENSHIFT_DEPLOYMENT_NAMESPACE
+                value: ${PROJECT}-${ENVIRONMENT}
+              - name: OPENSHIFT_DEPLOYMENT_PROJECT
+                value: ${PROJECT}
+              - name: SERVER_CONTEXT_PATH
+                value: ${SERVER_CONTEXT_PATH}
+              - name: SERVER_PORT
+                value: ${SERVER_PORT}
+              - name: SPRING_PROFILES_ACTIVE
+                value: openshift,${PROJECT},${ENVIRONMENT},${PROFILES}
+            envFrom:
+              - configMapRef:
+                  name: ${APPLICATION}
+                  optional: true
+              - configMapRef:
+                  name: shared
+                  optional: true
+              - secretRef:
+                  name: ${APPLICATION}
+                  optional: true
+              - secretRef:
+                  name: shared
+                  optional: true
+            image: docker-registry.default.svc:5000/${PROJECT}-${ENVIRONMENT}/${APPLICATION}@${IDENTIFIER}
+            imagePullPolicy: Always
+            livenessProbe:
+              failureThreshold: ${{PROBE_FAILURE_THRESHOLD}}
+              httpGet:
+                path: ${LIVENESS_PROBE_PATH}
+                port: ${{MANAGEMENT_PORT}}
+                scheme: HTTP
+              initialDelaySeconds: ${{PROBE_DELAY_SECONDS}}
+              periodSeconds: ${{PROBE_PERIOD_SECONDS}}
+              timeoutSeconds: ${{PROBE_TIMEOUT_SECONDS}}
+            name: ${APPLICATION}
+            ports:
+              - containerPort: ${{SERVER_PORT}}
+                protocol: TCP
+            readinessProbe:
+              failureThreshold: ${{PROBE_FAILURE_THRESHOLD}}
+              httpGet:
+                path: ${READINESS_PROBE_PATH}
+                port: ${{MANAGEMENT_PORT}}
+                scheme: HTTP
+              initialDelaySeconds: ${{PROBE_DELAY_SECONDS}}
+              periodSeconds: ${{PROBE_PERIOD_SECONDS}}
+              timeoutSeconds: ${{PROBE_TIMEOUT_SECONDS}}
+            resources:
+              limits:
+                cpu: ${CPU_LIMIT}
+                memory: ${MEMORY_LIMIT}
+              requests:
+                cpu: ${CPU_REQUEST}
+                memory: ${MEMORY_REQUEST}
+    triggers: []
+
+# Horizontal Pod Autoscaler
+- apiVersion: autoscaling/v1
+  kind: HorizontalPodAutoscaler
+  metadata:
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}
+  spec:
+    maxReplicas: ${{MAX_REPLICAS}}
+    minReplicas: ${{REPLICAS}}
+    scaleTargetRef:
+      apiVersion: extensions/v1beta1
+      kind: DeploymentConfig
+      name: ${APPLICATION}
+    targetCPUUtilizationPercentage: ${{TARGET_CPU_UTILIZATION_PERCENTAGE}}
+
+# Image Stream
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}
+    namespace: ${PROJECT}-${ENVIRONMENT}
+
+# Route (live)
+- apiVersion: v1
+  kind: Route
+  metadata:
+    annotations:
+      haproxy.router.openshift.io/ip_whitelist: ${ROUTER_IP_WHITELIST}
+      haproxy.router.openshift.io/timeout: ${ROUTER_TIMEOUT}
+      haproxy.router.ros.io/preserve-x-forwarded-host-header: ${ROUTER_PRESERVE_X_FORWARDED_HOST}
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}-live
+    namespace: ${PROJECT}-${ENVIRONMENT}
+  spec:
+    host: ${APPLICATION}-${PROJECT}-${ENVIRONMENT}.apps.live.ocp.ros.local
+    path: ${SERVER_CONTEXT_PATH}
+    port:
+      targetPort: application-tcp
+    tls:
+      insecureEdgeTerminationPolicy: ${ROUTER_INSECURE_TERMINATION_POLICY}
+      termination: edge
+    to:
+      kind: Service
+      name: ${APPLICATION}
+
+# Route (test)
+- apiVersion: v1
+  kind: Route
+  metadata:
+    annotations:
+      haproxy.router.openshift.io/ip_whitelist: ${ROUTER_IP_WHITELIST}
+      haproxy.router.openshift.io/timeout: ${ROUTER_TIMEOUT}
+      haproxy.router.ros.io/preserve-x-forwarded-host-header: ${ROUTER_PRESERVE_X_FORWARDED_HOST}
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}-test
+    namespace: ${PROJECT}-${ENVIRONMENT}
+  spec:
+    host: ${APPLICATION}-${PROJECT}-${ENVIRONMENT}.apps.test.ocp.ros.local
+    path: ${SERVER_CONTEXT_PATH}
+    port:
+      targetPort: application-tcp
+    tls:
+      insecureEdgeTerminationPolicy: ${ROUTER_INSECURE_TERMINATION_POLICY}
+      termination: edge
+    to:
+      kind: Service
+      name: ${APPLICATION}
+
+# Service
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      prometheus.io/port: ${MANAGEMENT_PORT}
+      prometheus.io/scheme: http
+      prometheus.io/scrape: ${PROMETHEUS_SCRAPE_ENABLED}
+      prometheus.io/path: ${PROMETHEUS_PATH}
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}
+    namespace: ${PROJECT}-${ENVIRONMENT}
+  spec:
+    ports:
+      - name: application-tcp
+        port: ${{SERVER_PORT}}
+        protocol: TCP
+        targetPort: ${{SERVER_PORT}}
+      - name: management-tcp
+        port: ${{MANAGEMENT_PORT}}
+        protocol: TCP
+        targetPort: ${{MANAGEMENT_PORT}}
+    selector:
+      app: ${APPLICATION}
+      deploymentconfig: ${APPLICATION}
+
+# Parameters
+parameters:
+  - name: APPLICATION
+    description: "The name of the application."
+    required: true
+  - name: CLUSTER
+    description: "The name of the cluster."
+    required: true
+  - name: CPU_LIMIT
+    description: "The maximum amount of CPU permitted."
+    required: false
+    value: "2000m"
+  - name: CPU_REQUEST
+    description: "The minimum amout of CPU required."
+    required: false
+    value: "1m"
+  - name: DEPLOYMENT_TIMEOUT_SECONDS
+    description: "The time to wait for updates before giving up."
+    required: false
+    value: "120"
+  - name: ENVIRONMENT
+    description: "The name of the environment."
+    required: true
+  - name: GC_MAX_METASPACE_SIZE
+    description: "The maximum metaspace size."
+    required: true
+    value: "100"
+  - name: IDENTIFIER
+    description: "Unique identifier of the image to be deployed."
+    required: true
+  - name: JAVA_ARGS
+    description: "Arguments to be passed to the Java application."
+    value: ""
+    required: false
+  - name: JAVA_MAX_MEM_RATIO
+    description: "Used to calculate -Xmx value based on container memory limit."
+    required: false
+    value: "60"
+  - name: LIVENESS_PROBE_PATH
+    description: "Liveness probe path."
+    required: false
+    value: "/info"
+  - name: MANAGEMENT_CONTEXT_PATH
+    description: "Management endpoint context-path."
+    required: false
+    value: ""
+  - name: MANAGEMENT_PORT
+    description: "Management endpoint HTTP port."
+    required: false
+    value: "8080"
+  - name: MANAGEMENT_SECURITY_ENABLED
+    description: "Enable security."
+    required: false
+    value: "false"
+  - name: MAX_REPLICAS
+    description: "The maximum number of replicas to which to scale up."
+    required: false
+    value: "1"
+  - name: MAX_SURGE
+    description: "Maximum number of additional pods that can be scheduled during deployment."
+    required: false
+    value: "1"
+  - name: MAX_UNAVAILABLE
+    description: "Maximum number of pods that can be unavailable during deployment."
+    required: false
+    value: "0"
+  - name: MEMORY_LIMIT
+    description: "The maximum amount of memory permitted."
+    required: false
+    value: "512Mi"
+  - name: MEMORY_REQUEST
+    description: "The minimum amout of memory required."
+    required: false
+    value: "512Mi"
+  - name: PROBE_DELAY_SECONDS
+    description: "Number of seconds after the container has started before probes are initiated. "
+    required: false
+    value: "15"
+  - name: PROBE_FAILURE_THRESHOLD
+    description: "Minimum consecutive failures for the probe to be considered failed."
+    required: false
+    value: "3"
+  - name: PROBE_PERIOD_SECONDS
+    description: "How often to perform the probes."
+    required: false
+    value: "30"
+  - name: PROBE_TIMEOUT_SECONDS
+    description: "Number of seconds after which the probe times out."
+    required: false
+    value: "5"
+  - name: PROFILES
+    description: "Any additional profiles to be activated within the application."
+    required: false
+    value: "default"
+  - name: PROJECT
+    description: "The name of the project."
+    required: true
+  - name: PROMETHEUS_PATH
+    description: "The path at which the prometheus endpoint is exposed."
+    required: true
+    value: "/prometheus"
+  - name: PROMETHEUS_SCRAPE_ENABLED
+    description: "Enable scraping of metrics from prometheus endpoint."
+    required: false
+    value: "false"
+  - name: READINESS_PROBE_PATH
+    description: "Readiness probe path."
+    required: false
+    value: "/health"
+  - name: REPLICAS
+    description: "The number of application replicas to deploy."
+    required: false
+    value: "1"
+  - name: ROUTER_INSECURE_TERMINATION_POLICY
+    description: "Indicates the desired behavior for insecure connections (Allow, Disable or Redirect)."
+    required: false
+    value: "Allow"
+  - name: ROUTER_IP_WHITELIST
+    description: "Space separated list of approved source ip addresses which may connect to the route."
+    required: false
+    value: "0.0.0.0/0"
+  - name: ROUTER_PRESERVE_X_FORWARDED_HOST
+    description: "Preserve x-forwarded-host header passed by route clients."
+    required: false
+    value: "false"
+  - name: ROUTER_TIMEOUT
+    description: "Sets a server-side timeout for the route."
+    required: false
+    value: "30s"
+  - name: SERVER_CONTEXT_PATH
+    description: "Context path of the application."
+    required: false
+    value: ""
+  - name: SERVER_PORT
+    description: "Server HTTP port."
+    required: false
+    value: "8080"
+  - name: TARGET_CPU_UTILIZATION_PERCENTAGE
+    description: ""
+    required: false
+    value: "200000"

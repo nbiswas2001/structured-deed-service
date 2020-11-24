@@ -1,0 +1,1 @@
+JOINT_PROF_WORD	: 'Advocates'| 'Apprentices' | 'Builders' | 'Contractors' | 'Farmers' | 'Solicitors' | 'Surveyors' ;

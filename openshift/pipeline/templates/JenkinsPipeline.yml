@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: "openshift-pipeline-template"
+objects:
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${APPLICATION}
+    name: "${APPLICATION}-pipeline"
+  spec:
+    failedBuildsHistoryLimit: 2
+    runPolicy: Parallel
+    source:
+      git:
+        ref: ${GIT_BRANCH}
+        uri: ${GIT_URL}
+      type: Git
+    strategy:
+      jenkinsPipelineStrategy:
+        env:
+          - name: "APPLICATION"
+            value: ${APPLICATION}
+          - name: "APPROVAL_GATES"
+            value: ${APPROVAL_GATES}
+          - name: "BUILD_LABEL"
+            value: ${BUILD_LABEL}
+          - name: "BUILD_STAGES"
+            value: ${BUILD_STAGES}
+          - name: "ENVIRONMENTS"
+            value: ${ENVIRONMENTS}
+          - name: "PROJECT"
+            value: ${PROJECT}
+        jenkinsfilePath: openshift/pipeline/Jenkinsfile
+      type: JenkinsPipeline
+    successfulBuildsHistoryLimit: 10
+parameters:
+  - name: APPLICATION
+    description: "The name of the application being built / deployed."
+    required: true
+  - name: APPROVAL_GATES
+    description: "The names of the environments for which manual approval is required prior to deployment."
+    required: true
+    value: "test,stage,prod"
+  - name: BUILD_LABEL
+    description: "Label for build pod (e.g. maven, nodejs)."
+    required: true
+    value: 'maven'
+  - name: BUILD_TYPE
+    description: "Type of build to run. This controls which folder in the steps directory in which to look for stage implementations."
+    required: true
+    value: 'gradle'
+  - name: BUILD_STAGES
+    description: "The names of the build stages to run. One of these stages must create a container image otherwise deployment stages will fail."
+    required: true
+    value: "prepare,build,package"
+  - name: ENVIRONMENTS
+    description: "The names of the environments in which to deploy the application."
+    required: true
+    value: "dev,test,stage,prod"
+  - name: GIT_BRANCH
+    description: "The name of the branch to build."
+    required: true
+    value: "master"
+  - name: GIT_URL
+    description: "The url of the git repository containing the application to be built / deployed."
+    required: true
+  - name: PROJECT
+    description: "The name of the project."
+    required: true

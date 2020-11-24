@@ -1,0 +1,11 @@
+git rm -rf openshift/pipeline
+
+git commit -am "Deleting old pipeline"
+
+git subtree add -P openshift/pipeline --squash git@gitlab.ros.gov.uk:ocp/pipeline-spring-boot-gradle.git master
+
+git push
+
+oc login --server=https://admin.live.ocp.ros.local:443
+oc project kir-ci-cd
+oc process -f openshift/pipeline/templates/JenkinsPipeline.yml --param-file=openshift/pipeline.properties | oc apply -f -

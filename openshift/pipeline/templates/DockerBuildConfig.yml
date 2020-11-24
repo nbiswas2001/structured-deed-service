@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Template
+objects:
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}
+    namespace: ${PROJECT}-ci-cd
+  spec:
+    failedBuildsHistoryLimit: 1
+    output:
+      imageLabels:
+        - name: uk.gov.ros.application
+          value: ${APPLICATION}
+        - name: uk.gov.ros.project
+          value: ${PROJECT}
+        - name: uk.gov.ros.version
+          value: ${VERSION}
+      to:
+        kind: ImageStreamTag
+        name: ${APPLICATION}:latest
+    resources:
+      limits:
+        cpu: 1
+        memory: 1Gi
+    runPolicy: Serial
+    source:
+      type: ${SOURCE_TYPE}
+    strategy:
+      forcePull: true
+      dockerStrategy:
+        buildArgs:
+          - name: VERSION
+            value: ${VERSION}
+        from:
+          kind: ImageStreamTag
+          name: ${SOURCE_IMAGE_NAME}:${SOURCE_IMAGE_VERSION}
+          namespace: ${SOURCE_IMAGE_NAMESPACE}
+        noCache: ${{NO_CACHE}}
+      type: Docker
+    successfulBuildsHistoryLimit: 5
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${APPLICATION}
+    name: ${APPLICATION}
+parameters:
+  - name: APPLICATION
+    description: "Name of the application."
+    required: true
+  - name: NO_CACHE
+    description: "If set to true the docker build will be executed with the --no-cache=true flag."
+    required: true
+    value: "false"
+  - name: PROJECT
+    description: "Name of the project."
+    required: true
+  - name: SOURCE_IMAGE_NAME
+    description: "Name of source container image."
+    required: true
+  - name: SOURCE_IMAGE_NAMESPACE
+    description: "Namespace of source container image."
+    required: true
+  - name: SOURCE_IMAGE_VERSION
+    description: "Version of source container image."
+    required: true
+  - name: SOURCE_TYPE
+    description: "Type of build input to accept."
+    required: true
+  - name: VERSION
+    description: "Version of the application."
+    required: true
